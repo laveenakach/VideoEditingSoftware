@@ -9,7 +9,7 @@ Route::get('/', function () {
 });
 
 Route::post('/export', [ExportController::class, 'export']);
-Route::get('/api/export/status/{id}', [ExportController::class, 'status']);
+//Route::get('/api/export/status/{id}', [ExportController::class, 'status']);
 
 // Route::get('/', function () {
 //     return view('welcome');

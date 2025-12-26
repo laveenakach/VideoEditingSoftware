@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
 <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -8,155 +8,164 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
 <style>
-body { font-family: Arial; padding:20px; }
-.aspect-box { max-width:600px; background:black; overflow:hidden; margin-bottom:10px; }
-.aspect-16-9 { aspect-ratio:16/9; }
-.aspect-9-16 { aspect-ratio:9/16; }
-.aspect-1-1 { aspect-ratio:1/1; }
-video { width:100%; height:100%; object-fit:cover; }
-label { display:block; margin-top:10px; }
+body { font-family: sans-serif; padding:20px; }
+.drop { border:2px dashed #999; padding:30px; text-align:center; cursor:pointer; }
+.aspect { max-width:600px; background:black; margin:15px 0; position:relative; }
+.aspect video { width:100%; height:100%; object-fit:cover; }
+
+.text-layer {
+ position:absolute;
+ top:40%; left:40%;
+ cursor:move;
+ padding:4px 8px;
+ background:rgba(0,0,0,.4);
+}
+
+.aspect-16-9 { aspect-ratio:16/9 }
+.aspect-9-16 { aspect-ratio:9/16 }
+.aspect-1-1  { aspect-ratio:1/1 }
 </style>
 </head>
 
 <body>
 
-<h2>Simple Video Editor</h2>
+<div x-data="editor()" x-init="init()">
 
-<div x-data="editor()">
-
-<!-- Upload -->
-<input type="file" accept="video/*" @change="upload">
-
-<!-- Preview -->
-<div x-show="videoUrl"
-     class="aspect-box"
-     :class="{
-       'aspect-16-9': aspect==='16:9',
-       'aspect-9-16': aspect==='9:16',
-       'aspect-1-1': aspect==='1:1'
-     }">
-
-  <video x-ref="video"
-         :src="videoUrl"
-         controls
-         @play="forceStart"></video>
+<!-- UPLOAD -->
+<div class="drop"
+ @drop.prevent="handleDrop($event)"
+ @dragover.prevent
+ @click="$refs.file.click()">
+ Drop video or click
+ <input type="file" x-ref="file" hidden accept="video/*" @change="loadVideo">
 </div>
 
-<!-- Trim Controls -->
-<label>Trim Start: <span x-text="start.toFixed(1)"></span>s</label>
-<input type="range" min="0" :max="duration" step="0.1"
-       x-model.number="start"
-       @input="jumpToStart">
+<!-- PREVIEW -->
+<div x-show="videoUrl"
+ class="aspect"
+ :class="aspectClass">
+ <video x-ref="video" :src="videoUrl" controls></video>
 
-<label>Trim End: <span x-text="end.toFixed(1)"></span>s</label>
-<input type="range" min="0" :max="duration" step="0.1"
-       x-model.number="end">
+ <!-- TEXT OVERLAY -->
+ <div class="text-layer"
+  x-text="overlay.text"
+  :style="overlayStyle"
+  @mousedown="dragStart">
+ </div>
+</div>
 
-<!-- Aspect -->
-<label>Aspect Ratio</label>
-<select x-model="aspect">
-  <option value="16:9">16:9</option>
-  <option value="9:16">9:16</option>
-  <option value="1:1">1:1</option>
-</select>
+<!-- CONTROLS -->
+<div x-show="videoUrl">
+ Trim:
+ <input type="range" min="0" :max="duration" step="0.1" x-model.number="start">
+ <input type="range" min="0" :max="duration" step="0.1" x-model.number="end">
 
-<br><br>
-<button @click="exportVideo">Export</button>
+ <br><br>
+
+ Text:
+ <input x-model="overlay.text" placeholder="Text">
+ <input type="color" x-model="overlay.color">
+ <input type="number" x-model.number="overlay.size">
+
+ <br><br>
+
+ Aspect:
+ <select x-model="aspect">
+  <option>16:9</option>
+  <option>9:16</option>
+  <option>1:1</option>
+ </select>
+
+ <br><br>
+
+ <button @click="exportVideo()">Export</button>
+</div>
 
 <p x-show="loading">Rendering…</p>
-
-<a x-show="download" :href="download" download>Download Video</a>
+<a x-show="download" :href="download" download>Download</a>
 
 </div>
 
 <script>
-function editor() {
-  return {
-    file: null,
-    videoUrl: null,
+function editor(){
+ return {
+  file:null, videoUrl:null,
+  start:0, end:0, duration:0,
+  aspect:'16:9',
+  loading:false, download:null,
 
-    start: 0,
-    end: 0,
-    duration: 0,
+  overlay:{
+   text:'Hello',
+   x:40, y:40,
+   size:32,
+   color:'#ffffff'
+  },
 
-    aspect: '16:9',
-    loading: false,
-    download: null,
+  get aspectClass(){
+   return {
+    'aspect-16-9':this.aspect==='16:9',
+    'aspect-9-16':this.aspect==='9:16',
+    'aspect-1-1':this.aspect==='1:1'
+   }
+  },
 
-    upload(e) {
-      this.file = e.target.files[0];
-      this.videoUrl = URL.createObjectURL(this.file);
+  get overlayStyle(){
+   return `
+    top:${this.overlay.y}%;
+    left:${this.overlay.x}%;
+    font-size:${this.overlay.size}px;
+    color:${this.overlay.color};
+   `;
+  },
 
-      this.$nextTick(() => {
-        const v = this.$refs.video;
+  init(){
+   this.$watch('start',v=>{ if(v>this.end) this.start=this.end })
+  },
 
-        v.onloadedmetadata = () => {
-          this.duration = v.duration;
-          this.start = 0;
-          this.end = v.duration;
-          v.currentTime = 0;
-        };
+  handleDrop(e){
+   this.loadVideo({ target:{ files:e.dataTransfer.files }})
+  },
 
-        // 🔴 stop at trim end
-        v.ontimeupdate = () => {
-          if (v.currentTime >= this.end) {
-            v.pause();
-          }
-        };
-      });
-    },
-
-    // 🔴 jump immediately to trim start
-    jumpToStart() {
-      const v = this.$refs.video;
-      v.pause();
-      v.currentTime = this.start;
-    },
-
-    // 🔴 force play from trim start
-    forceStart() {
-      const v = this.$refs.video;
-      if (v.currentTime < this.start || v.currentTime > this.end) {
-        v.currentTime = this.start;
-      }
-    },
-
-    exportVideo() {
-      this.loading = true;
-
-      const f = new FormData();
-      f.append('video', this.file);
-      f.append('start', this.start);
-      f.append('end', this.end);
-      f.append('aspect', this.aspect);
-
-      fetch('/export', {
-        method: 'POST',
-        headers: {
-          'X-CSRF-TOKEN': document
-            .querySelector('meta[name=csrf-token]').content
-        },
-        body: f
-      })
-      .then(r => r.json())
-      .then(d => this.poll(d.edit_id))
-      .catch(() => alert('Export failed'));
-    },
-
-    poll(id) {
-      const timer = setInterval(() => {
-        fetch(`/api/export/status/${id}`)
-          .then(r => r.json())
-          .then(d => {
-            if (d.status === 'completed') {
-              this.download = d.output_path;
-              this.loading = false;
-              clearInterval(timer);
-            }
-          });
-      }, 2000);
+  loadVideo(e){
+   this.file=e.target.files[0]
+   this.videoUrl=URL.createObjectURL(this.file)
+   this.$nextTick(()=>{
+    let v=this.$refs.video
+    v.onloadedmetadata=()=>{
+     this.duration=v.duration
+     this.end=v.duration
     }
+   })
+  },
+
+  dragStart(e){
+   let move = ev=>{
+    this.overlay.x += ev.movementX/5
+    this.overlay.y += ev.movementY/5
+   }
+   window.addEventListener('mousemove',move)
+   window.addEventListener('mouseup',()=>window.removeEventListener('mousemove',move),{once:true})
+  },
+
+  exportVideo(){
+   this.loading=true
+   let f=new FormData()
+   f.append('video',this.file)
+   f.append('start',this.start)
+   f.append('end',this.end)
+   f.append('aspect',this.aspect)
+   f.append('text',JSON.stringify(this.overlay))
+
+   fetch('/export',{
+    method:'POST',
+    headers:{'X-CSRF-TOKEN':document.querySelector('meta[name=csrf-token]').content},
+    body:f
+   }).then(r=>r.json()).then(d=>{
+    this.download=d.download
+    this.loading=false
+   })
   }
+ }
 }
 </script>
 

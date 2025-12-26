@@ -10,31 +10,47 @@ class ExportController extends Controller
 {
     public function export(Request $request)
     {
-        // ✅ validate
-        $request->validate([
-            'video' => 'required|file|mimes:mp4,mov,avi',
-            'start' => 'required|numeric',
-            'end' => 'required|numeric',
-            'aspect' => 'required|string'
-        ]);
+        // 1. Store video
+        $video = $request->file('video')->store('videos', 'public');
 
-        // ✅ store uploaded video
-        $path = $request->file('video')->store('videos', 'public');
+        // 2. Parse text
+        $text = json_decode($request->text, true);
 
-        // ✅ save edit info
-        $edit = VideoEdit::create([
-            'video_path' => $path,
-            'start' => $request->start,
-            'end' => $request->end,
-            'aspect' => $request->aspect,
-            'status' => 'processing'
-        ]);
+        $start = (float) $request->start;
+        $end   = (float) $request->end;
+        $dur   = $end - $start;
 
-        // ⚠️ later this will be FFmpeg job
-        // dispatch(new RenderVideoJob($edit));
+        // 3. Paths
+        $input  = storage_path("app/public/$video");
+        $outputName = 'out_' . time() . '.mp4';
+        $output = storage_path("app/public/exports/$outputName");
 
+        // 4. Ensure exports dir exists
+        if (!file_exists(dirname($output))) {
+            mkdir(dirname($output), 0755, true);
+        }
+
+        // 5. FFmpeg path (Windows)
+        $ffmpeg = 'C:\\ffmpeg\\bin\\ffmpeg.exe';
+
+        // 6. Draw text
+        $draw = "drawtext=text='{$text['text']}':x=w*{$text['x']}/100:y=h*{$text['y']}/100:fontsize={$text['size']}:fontcolor={$text['color']}";
+
+        // 7. Execute
+        $cmd = "\"$ffmpeg\" -y -ss $start -i \"$input\" -t $dur -vf \"$draw\" -c:v libx264 -c:a aac \"$output\"";
+        exec($cmd, $log, $status);
+
+        // 8. If FFmpeg failed
+        if ($status !== 0 || !file_exists($output)) {
+            return response()->json([
+                'error' => 'Export failed',
+                'log' => $log
+            ], 500);
+        }
+
+        // 9. Return public URL
         return response()->json([
-            'edit_id' => $edit->id
+            'download' => asset("storage/exports/$outputName")
         ]);
     }
 
